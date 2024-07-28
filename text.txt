@@ -1,0 +1,63 @@
+const addExpense = async (req, res) => {
+    try {
+      const { description, amount, paidByName, paidByEmail, paidByMobile, participants, splitType } = req.body;
+  
+      // Validate user input
+      if (!description || !amount || !paidByName || !paidByEmail || !paidByMobile || !participants || !splitType) {
+        return res.status(400).json({ message: 'All fields are required' });
+      }
+  
+      // Fetch or create the user who paid
+      let paidByUser = await User.findOne({ name: paidByName, email: paidByEmail });
+      if (!paidByUser) {
+        paidByUser = new User({ name: paidByName, email: paidByEmail, mobile: paidByMobile });
+        await paidByUser.save();
+      }
+  
+      // Process participant users
+      const participantUsers = await Promise.all(
+        participants.map(async (participant) => {
+          const { name, email, mobile } = participant;
+          let user = await User.findOne({ name, email });
+          if (!user) {
+            user = new User({ name, email, mobile });
+            await user.save();
+          }
+          return user;
+        })
+      );
+  
+      // Calculate amounts based on split type
+      const splitAmounts = [];
+      if (splitType === 'equal') {
+        const splitAmount = amount / participantUsers.length;
+        participantUsers.forEach(user => {
+          splitAmounts.push({ userId: user._id, amount: splitAmount });
+        });
+      } else if (splitType === 'percentage') {
+        participants.forEach((participant, index) => {
+          const calculatedAmount = (amount * participant.amount) / 100;
+          splitAmounts.push({ userId: participantUsers[index]._id, amount: calculatedAmount });
+        });
+      } else if (splitType === 'exact') {
+        participants.forEach((participant, index) => {
+          splitAmounts.push({ userId: participantUsers[index]._id, amount: participant.amount });
+        });
+      }
+  
+      // Create new expense
+      const expense = new Expense({
+        description,
+        amount,
+        paidBy: paidByUser._id,
+        participants: splitAmounts,
+        splitType,
+      });
+      await expense.save();
+  
+      res.status(201).json({ message: 'Expense added successfully', expense });
+    } catch (error) {
+      res.status(500).json({ message: error.message || 'Server error' });
+    }
+  };
+  
