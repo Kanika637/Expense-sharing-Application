@@ -26,12 +26,31 @@ const addExpense = async (req, res) => {
         return { userId: user._id, amount: participant.amount };
       }));
   
-      // Validate percentage split
-      if (splitType === 'percentage') {
-        const totalPercentage = participants.reduce((sum, participant) => sum + participant.amount, 0);
-        if (totalPercentage !== 100) {
-          return res.status(400).json({ message: 'Percentages do not add up to 100%' });
-        }
+      // Validate and calculate splits
+      switch (splitType) {
+        case 'equal':
+          const equalAmount = amount / participants.length;
+          validatedParticipants.forEach(participant => {
+            participant.amount = equalAmount;
+          });
+          break;
+        case 'exact':
+          const totalExact = validatedParticipants.reduce((sum, participant) => sum + participant.amount, 0);
+          if (totalExact !== amount) {
+            return res.status(400).json({ message: 'Total exact amounts do not equal the total expense amount' });
+          }
+          break;
+        case 'percentage':
+          const totalPercentage = participants.reduce((sum, participant) => sum + participant.amount, 0);
+          if (totalPercentage !== 100) {
+            return res.status(400).json({ message: 'Percentages do not add up to 100%' });
+          }
+          validatedParticipants.forEach(participant => {
+            participant.amount = (participant.amount / 100) * amount;
+          });
+          break;
+        default:
+          return res.status(400).json({ message: 'Invalid split type' });
       }
   
       const expense = new Expense({
@@ -55,7 +74,7 @@ const addExpense = async (req, res) => {
     }
   };
 
-
+  
 // Get Individual User Expenses
 const getUserExpenses = async (req, res) => {
     try {
@@ -64,14 +83,38 @@ const getUserExpenses = async (req, res) => {
         return res.status(404).json({ message: 'User not found' });
       }
   
+      // Fetch expenses where the user is the payer or a participant
       const expenses = await Expense.find({
         $or: [
-          { paidBy: user._id },
+          { 'paidBy': user._id },
           { 'participants.userId': user._id }
         ]
-      }).populate('paidBy', 'name email').populate('participants.userId', 'name email');
+      })
+        .populate('paidBy', 'name email')
+        .populate('participants.userId', 'name email');
   
-      res.status(200).json(expenses);
+      // Calculate the user's share in each expense
+      const userExpenses = expenses.map(expense => {
+        const userShare = expense.participants.find(participant => participant.userId._id.equals(user._id));
+        return {
+          description: expense.description,
+          totalAmount: expense.amount,
+          paidBy: {
+            name: expense.paidBy.name,
+            email: expense.paidBy.email
+          },
+          userShare: userShare ? {
+            name: user.name,
+            email: user.email,
+            amount: userShare.amount
+          } : null,
+          splitType: expense.splitType,
+          createdAt: expense.createdAt,
+          updatedAt: expense.updatedAt
+        };
+      });
+  
+      res.status(200).json(userExpenses);
     } catch (error) {
       res.status(500).json({ message: 'Server error', error: error.message });
     }
@@ -80,13 +123,37 @@ const getUserExpenses = async (req, res) => {
 
 // Get Overall Expenses
 const getAllExpenses = async (req, res) => {
-  try {
-    const expenses = await Expense.find().populate('paidBy participants.userId', 'name email');
-    res.status(200).json(expenses);
-  } catch (error) {
-    res.status(500).json({ message: 'Server error' });
-  }
-};
+    try {
+      const expenses = await Expense.find()
+        .populate('paidBy', 'name email')
+        .populate('participants.userId', 'name email')
+        .lean(); // Convert MongoDB documents to plain JavaScript objects
+  
+      const formattedExpenses = expenses.map(expense => ({
+        _id: expense._id,
+        description: expense.description,
+        amount: expense.amount,
+        paidBy: expense.paidBy ? {
+          name: expense.paidBy.name,
+          email: expense.paidBy.email,
+        } : null,
+        participants: expense.participants.map(participant => ({
+          name: participant.userId ? participant.userId.name : null,
+          email: participant.userId ? participant.userId.email : null,
+          amount: participant.amount,
+        })),
+        splitType: expense.splitType,
+        createdAt: expense.createdAt,
+        updatedAt: expense.updatedAt,
+      }));
+  
+      res.status(200).json(formattedExpenses);
+    } catch (error) {
+      res.status(500).json({ message: 'Server error', error: error.message });
+    }
+  };
+  
+  
 
 // Download Balance Sheet 
 const downloadBalanceSheet = async (req, res) => {

@@ -11,13 +11,13 @@ const { validateExpense } = require('../middleware/validationMiddleware');
 const router = express.Router();
 
 // Add Expense
-router.post('/', validateExpense,addExpense);
+router.post('/add', validateExpense,addExpense);
 
 // Retrieve Individual User Expenses by Name
 router.get('/user/:name', getUserExpenses);
 
 // Retrieve Overall Expenses
-router.get('/', getAllExpenses);
+router.get('/all', getAllExpenses);
 
 // Download Balance Sheet
 router.get('/balance-sheet', downloadBalanceSheet);
